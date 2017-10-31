@@ -115,3 +115,24 @@ func TestInstrument(t *testing.T) {
 	})
 	unregister(p)
 }
+
+func TestGetPathFromHandler(t *testing.T) {
+	r := gin.New()
+	p := New(Engine(r))
+	r.Use(p.Instrument())
+	path := "/user/:id"
+	var hname string
+	handler := func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"id": c.Param("id")})
+		hname = c.HandlerName()
+	}
+	// The route has not been added yet so it is unknown to the map
+	assert.Empty(t, p.getPathFromHandler(hname))
+	r.GET(path, handler)
+	// Once there is a request to this route we are forced to update the map
+	// thus making it available
+	g := gofight.New()
+	g.GET("/user/10").Run(r, func(r gofight.HTTPResponse, rq gofight.HTTPRequest) { assert.Equal(t, http.StatusOK, r.Code) })
+	assert.NotEmpty(t, p.getPathFromHandler(hname))
+	unregister(p)
+}

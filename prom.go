@@ -13,11 +13,6 @@ import (
 var defaultPath = "/metrics"
 var defaultSys = "gin"
 
-type pmap struct {
-	sync.RWMutex
-	values map[string]string
-}
-
 // Prometheus contains the metrics gathered by the instance and its path
 type Prometheus struct {
 	reqCnt               *prometheus.CounterVec
@@ -26,7 +21,7 @@ type Prometheus struct {
 	MetricsPath string
 	Subsystem   string
 	Engine      *gin.Engine
-	PathMap     pmap
+	PathMap     sync.Map
 }
 
 // Path is an option allowing to set the metrics path when intializing with New.
@@ -72,29 +67,26 @@ func New(options ...func(*Prometheus)) *Prometheus {
 	if p.Engine != nil {
 		p.Engine.GET(p.MetricsPath, prometheusHandler())
 	}
-	p.PathMap.values = make(map[string]string)
 	return p
 }
 
 func (p *Prometheus) updatePathMap() {
-	p.PathMap.Lock()
-	defer p.PathMap.Unlock()
 	for _, ri := range p.Engine.Routes() {
-		p.PathMap.values[ri.Handler] = ri.Path
+		p.PathMap.Store(ri.Handler, ri.Path)
 	}
 }
 
 func (p *Prometheus) getPathFromHandler(handler string) string {
-	p.PathMap.RLock()
-	defer p.PathMap.RUnlock()
-	if in, ok := p.PathMap.values[handler]; ok {
-		return in
+	// Check if the handler is in the map and if so return it
+	if in, ok := p.PathMap.Load(handler); ok {
+		return in.(string)
 	}
-	p.PathMap.RUnlock()
+	// Otherwise, other routes might have been added to the engine meanwhile
+	// so we just update again
 	p.updatePathMap()
-	p.PathMap.RLock()
-	if in, ok := p.PathMap.values[handler]; ok {
-		return in
+	// Retry and if we still don't have the value, then return an empty string
+	if in, ok := p.PathMap.Load(handler); ok {
+		return in.(string)
 	}
 	return ""
 }
